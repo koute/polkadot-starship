@@ -3,6 +3,7 @@
 require "shellwords"
 require "fileutils"
 require "json"
+require "yaml"
 require "socket"
 require "set"
 
@@ -30,6 +31,19 @@ def is_port_open? port
 
     rescue Errno::EADDRINUSE
         false
+end
+
+def wait_for_port port
+    100.times do
+        socket = TCPSocket.new "127.0.0.1", port
+        socket.close
+        return
+        rescue Errno::ECONNREFUSED
+            sleep 0.1
+            next
+    end
+
+    raise "timeout waiting for port"
 end
 
 def run( cmd )
@@ -188,6 +202,7 @@ Node = Struct.new(
     :phrase,
     :port,
     :ws_port,
+    :prometheus_port,
     :is_validator,
     :is_collator,
     :is_bootnode,
@@ -227,6 +242,15 @@ def create_node( chain, name )
 
         node.ws_port = BASE_PORT_WS + port_offset
         break if is_port_open? node.ws_port
+    end
+
+    loop do
+        $prometheus_port_counter ||= 0
+        port_offset = $prometheus_port_counter
+        $prometheus_port_counter += 1
+
+        node.prometheus_port = BASE_PORT_PROMETHEUS + port_offset
+        break if is_port_open? node.prometheus_port
     end
 
     node.is_validator = false
@@ -459,7 +483,8 @@ def node_to_args chain, node
         "--no-mdns",
         "--db-cache", "2",
         "--pool-kbytes", "2048",
-        "--listen-addr", "/ip4/0.0.0.0/tcp/#{node.port}"
+        "--listen-addr", "/ip4/0.0.0.0/tcp/#{node.port}",
+        "--prometheus-port", node.prometheus_port
     ]
 
     args += ["--validator"] if node.is_validator
@@ -468,7 +493,90 @@ def node_to_args chain, node
     args
 end
 
+def generate_prometheus_config chain
+    config = {
+        "global" => {
+            "scrape_interval" => "5s",
+            "evaluation_interval" => "5s"
+        },
+        "scrape_configs" => []
+    }
+
+    chain.nodes.each do |node|
+        config["scrape_configs"] << {
+            "job_name" => node.name,
+            "static_configs" => [
+                {
+                    "targets" => ["127.0.0.1:#{node.prometheus_port}"],
+                    "labels" => {
+                        "network" => chain.name
+                    }
+                }
+            ]
+        }
+    end
+
+    prometheus_path = File.join ROOT, "prometheus"
+    FileUtils.mkdir_p prometheus_path
+    File.write File.join( prometheus_path, "prometheus.yml" ), config.to_yaml
+end
+
+def start_monitoring
+    STDERR.puts "Starting Prometheus..."
+    run "screen -dmS prometheus docker run --rm --net=host --name starship-prometheus -v #{File.join( ROOT, "prometheus" ).shellescape}:/etc/prometheus prom/prometheus"
+
+    STDERR.puts "Starting Grafana..."
+    run "screen -dmS grafana docker run --rm --net=host --name starship-grafana grafana/grafana"
+
+    STDERR.puts "Waiting for Grafana to start..."
+    wait_for_port 3000
+
+    cookie_jar = File.join ROOT, "grafana-cookies"
+    STDERR.puts "Configuring Grafana..."
+    payload = {
+        "user" => "admin",
+        "email" => "",
+        "password" => "admin"
+    }.to_json
+    run "curl -s -c #{cookie_jar.shellescape} 'http://localhost:3000/login' -H 'Content-Type: application/json' --data-binary #{payload.shellescape} > /dev/null"
+
+    payload = {
+        "name" => "Prometheus",
+        "type" => "prometheus",
+        "access" => "proxy",
+        "url" => "http://localhost:9090",
+        "isDefault" => true
+    }.to_json
+    run "curl -s -b #{cookie_jar.shellescape} 'http://localhost:3000/api/datasources' -X POST -H 'Content-Type: application/json' --data-binary #{payload.shellescape} > /dev/null"
+
+    if File.exist? "default-dashboard.json"
+        dashboard = JSON.parse( File.read( "default-dashboard.json" ) )
+        payload = {
+            "dashboard" => dashboard,
+            "inputs" => [
+                "name" => "DS_PROMETHEUS",
+                "pluginId" => "prometheus",
+                "type" => "datasource",
+                "value" => "Prometheus"
+            ],
+            "overwrite" => true
+        }.to_json
+
+        payload_path = File.join ROOT, "grafana-dashboard-import.json"
+        File.write payload_path, payload
+
+        reply = capture "curl -s -b #{cookie_jar.shellescape} 'http://localhost:3000/api/dashboards/import' -X POST -H 'Content-Type: application/json' --data-binary #{("@" + payload_path).shellescape}"
+        STDERR.puts JSON.parse( reply )["message"]
+    end
+
+    STDERR.puts "#{VT_GREEN}Finished launching monitoring!#{VT_RESET}"
+    STDERR.puts "#{VT_GREEN}Grafana available at: http://localhost:3000 (use 'admin' as username/password)#{VT_RESET}"
+    STDERR.puts
+end
+
 def start_network chain
+    generate_prometheus_config chain
+
     chain.nodes.each do |node|
         STDERR.puts "Generating keys for relay chain node '#{node.name}' (phrase = #{node.phrase.inspect})..."
         node.keys = generate_keys node.phrase
@@ -515,10 +623,13 @@ def start_network chain
     end
 
     STDERR.puts "#{VT_GREEN}Finished launching the network!#{VT_RESET}"
+    STDERR.puts
 end
 
 # Kill any previous network which might still be running and clean up the files.
 system "killall -q #{File.basename POLKADOT}"
 system "killall -q #{File.basename POLKADOT_COLLATOR}"
+system "docker stop starship-prometheus &> /dev/null"
+system "docker stop starship-grafana &> /dev/null"
 FileUtils.rm_rf ROOT
 FileUtils.mkdir_p ROOT

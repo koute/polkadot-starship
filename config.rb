@@ -15,3 +15,6 @@ BASE_PORT_NODE = 30333
 
 # Start assigning the websocket ports starting at this port
 BASE_PORT_WS = 9944
+
+# Start assigning nodes' Prometheus ports starting at this port
+BASE_PORT_PROMETHEUS = 9091

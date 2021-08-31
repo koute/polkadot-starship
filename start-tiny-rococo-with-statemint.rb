@@ -23,3 +23,4 @@ node.is_collator = true
 node.extra_args += ["--force-authoring"]
 
 start_network relay_chain
+start_monitoring

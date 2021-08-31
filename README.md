@@ -6,6 +6,7 @@
 - Can launch networks of any size, with any number of validators, collators and parachains,
   where the only limiting factor is how much RAM and how much CPU horsepower you have.
 - Can launch a local Polkadot, Kusama, Rococo and a Statemine chain.
+- Can launch Prometheus and Grafana for access to metrics.
 
 ### Requirements
 
@@ -13,6 +14,7 @@
 2. Ruby (v3.0 or later recommended)
 3. `screen`
 4. `polkadot` and `polkadot-collator` binaries
+5. `docker` (optional, for launching Prometheus and Grafana)
 
 ### Usage
 
@@ -20,6 +22,7 @@
 2. Run one of the `start-*` scripts to start a network
 3. Use `screen -r` to access a running node
 4. `killall polkadot polkadot-collator` to kill the network
+5. `docker stop starship-prometheus` and `docker stop starship-grafana` to kill the monitoring
 
 ### Why yet another project to launch a testnet?
 

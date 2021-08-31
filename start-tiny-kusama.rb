@@ -16,3 +16,4 @@ node.is_validator = true
 node = create_node( relay_chain, "relay_n001" )
 
 start_network relay_chain
+start_monitoring

@@ -40,3 +40,4 @@ PARACHAIN_CHAINSPECS.each_with_index.each do |chainspec_name, p|
 end
 
 start_network relay_chain
+start_monitoring

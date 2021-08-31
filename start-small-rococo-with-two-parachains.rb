@@ -45,5 +45,5 @@ node = create_node( parachain_2, "para02_n001" )
 connect_with_hrmp( parachain_1, parachain_2 )
 connect_with_hrmp( parachain_2, parachain_1 )
 
-
 start_network relay_chain
+start_monitoring
