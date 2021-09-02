@@ -621,6 +621,10 @@ def start_network chain
         File.write start_sh, cmd
         FileUtils.chmod 0755, start_sh
         run cmd
+
+        stop_sh = File.join node.root_path, "stop.sh"
+        File.write stop_sh, "screen -S #{node.name.shellescape} -p 0 -X stuff '^C'"
+        FileUtils.chmod 0755, stop_sh
     end
 
     chain.parachains.each do |parachain|
@@ -637,6 +641,10 @@ def start_network chain
             File.write start_sh, cmd
             FileUtils.chmod 0755, start_sh
             run cmd
+
+            stop_sh = File.join node.root_path, "stop.sh"
+            File.write stop_sh, "screen -S #{node.name.shellescape} -p 0 -X stuff '^C'"
+            FileUtils.chmod 0755, stop_sh
         end
     end
 
