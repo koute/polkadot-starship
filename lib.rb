@@ -166,7 +166,7 @@ def create_chain( name, binary, base_chainspec )
     chain.name = name
 
     # The path to the `polkadot` or `polkadot-collator` we'll later use.
-    chain.binary = binary
+    chain.binary = File.expand_path binary
     # The path under which we'll store all of the chain's files.
     chain.root_path = File.join ROOT, chain.name
     # Where we'll later store the human-readable chainspec.
