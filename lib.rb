@@ -616,7 +616,11 @@ def start_network chain
         STDERR.puts "Starting node '#{node.name}' on '#{chain.name}'..."
         args = node_to_args chain, node
         args = args.map(&:to_s).map(&:shellescape).join(" ")
-        run "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} #{chain.binary.shellescape} #{args}"
+        cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} #{chain.binary.shellescape} #{args}"
+        start_sh = File.join node.root_path, "start.sh"
+        File.write start_sh, cmd
+        FileUtils.chmod 0755, start_sh
+        run cmd
     end
 
     chain.parachains.each do |parachain|
@@ -628,7 +632,11 @@ def start_network chain
             # And these args are for the relay chain node.
             args += node_to_args chain, node.relaynode
             args = args.map(&:to_s).map(&:shellescape).join(" ")
-            run "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} #{parachain.binary.shellescape} #{args}"
+            cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} #{parachain.binary.shellescape} #{args}"
+            start_sh = File.join node.root_path, "start.sh"
+            File.write start_sh, cmd
+            FileUtils.chmod 0755, start_sh
+            run cmd
         end
     end
 
