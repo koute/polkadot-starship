@@ -196,6 +196,7 @@ Node = Struct.new(
     :logs_path,
     :start,
     :relaynode,
+    :paranode,
     :keys,
 
     # These can be used to customize the node.
@@ -266,6 +267,7 @@ def create_node( chain, name )
     if chain.relaychain
         # Every parachain node also automatically runs a relay chain node.
         node.relaynode = create_node( chain.relaychain, name )
+        node.relaynode.paranode = node
         # Since the parachain node will automatically start the relay chain
         # node we don't need to explicitly start it ourselves.
         node.relaynode.start = false
@@ -503,13 +505,21 @@ def generate_prometheus_config chain
     }
 
     chain.nodes.each do |node|
+        targets = ["127.0.0.1:#{node.prometheus_port}"]
+        if node.paranode
+            # The Prometheus endpoint on the paranode side has only a bunch of "substrate_*" metrics;
+            # not sure how useful it actually is, but let's just include it here anyway.
+            targets << "127.0.0.1:#{node.paranode.prometheus_port}"
+        end
         config["scrape_configs"] << {
             "job_name" => node.name,
             "static_configs" => [
                 {
-                    "targets" => ["127.0.0.1:#{node.prometheus_port}"],
+                    "targets" => targets,
                     "labels" => {
-                        "network" => chain.name
+                        # For compatibility with production dashboards.
+                        "domain" => "local",
+                        "instance" => node.name
                     }
                 }
             ]
@@ -523,10 +533,10 @@ end
 
 def start_monitoring
     STDERR.puts "Starting Prometheus..."
-    run "screen -dmS prometheus docker run --rm --net=host --name starship-prometheus -v #{File.join( ROOT, "prometheus" ).shellescape}:/etc/prometheus prom/prometheus"
+    run "screen -L -Logfile #{(File.join ROOT, "prometheus-logs.txt").shellescape} -dmS prometheus docker run --rm --net=host --name starship-prometheus -v #{File.join( ROOT, "prometheus" ).shellescape}:/etc/prometheus prom/prometheus"
 
     STDERR.puts "Starting Grafana..."
-    run "screen -dmS grafana docker run --rm --net=host --name starship-grafana grafana/grafana"
+    run "screen -L -Logfile #{(File.join ROOT, "grafana-logs.txt").shellescape} -dmS grafana docker run --rm --net=host --name starship-grafana grafana/grafana"
 
     STDERR.puts "Waiting for Grafana to start..."
     wait_for_port 3000
