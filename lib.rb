@@ -589,7 +589,7 @@ def start_monitoring
 end
 
 def launch_node node, chain, args
-    cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} "
+    cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} nice -n 20 "
     if node.cpu_list
         cmd << "taskset --cpu-list #{node.cpu_list.join(",")} "
     end
