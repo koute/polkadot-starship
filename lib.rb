@@ -34,7 +34,7 @@ def is_port_open? port
 end
 
 def wait_for_port port
-    100.times do
+    1000.times do
         socket = TCPSocket.new "127.0.0.1", port
         socket.close
         return
