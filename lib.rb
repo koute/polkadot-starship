@@ -198,6 +198,7 @@ Node = Struct.new(
     :relaynode,
     :paranode,
     :keys,
+    :cpu_list,
 
     # These can be used to customize the node.
     :phrase,
@@ -588,7 +589,12 @@ def start_monitoring
 end
 
 def launch_node node, chain, args
-    cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} #{chain.binary.shellescape} #{args}"
+    cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} "
+    if node.cpu_list
+        cmd << "taskset --cpu-list #{node.cpu_list.join(",")} "
+    end
+    cmd << "#{chain.binary.shellescape} #{args}"
+
     start_sh = File.join node.root_path, "start.sh"
     File.write start_sh, cmd
     FileUtils.chmod 0755, start_sh
