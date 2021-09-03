@@ -4,6 +4,8 @@ require_relative "lib.rb"
 
 RELAY_CHAINSPEC = "kusama-local"
 
+prepare_workspace
+
 relay_chain = create_chain( "relay", POLKADOT, RELAY_CHAINSPEC )
 
 node = create_node( relay_chain, "relay_v001" )

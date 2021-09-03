@@ -16,6 +16,8 @@ COMMON_EXTRA_ARGS = [
     "interpreted-i-know-what-i-do"
 ]
 
+prepare_workspace
+
 relay_chain = create_chain( "relay", POLKADOT, RELAY_CHAINSPEC )
 node = create_node( relay_chain, "relay_bootnode" )
 node.is_bootnode = true

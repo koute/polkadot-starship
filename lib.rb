@@ -652,10 +652,17 @@ def start_network chain
     STDERR.puts
 end
 
-# Kill any previous network which might still be running and clean up the files.
-system "killall -q #{File.basename POLKADOT}"
-system "killall -q #{File.basename POLKADOT_COLLATOR}"
-system "docker stop starship-prometheus &> /dev/null"
-system "docker stop starship-grafana &> /dev/null"
-FileUtils.rm_rf ROOT
-FileUtils.mkdir_p ROOT
+def stop_network
+    # Kill any previous network which might still be running.
+    system "killall -q #{File.basename POLKADOT}"
+    system "killall -q #{File.basename POLKADOT_COLLATOR}"
+    system "docker stop starship-prometheus &> /dev/null"
+    system "docker stop starship-grafana &> /dev/null"
+end
+
+def prepare_workspace
+    stop_network
+
+    FileUtils.rm_rf ROOT
+    FileUtils.mkdir_p ROOT
+end

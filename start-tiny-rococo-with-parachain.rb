@@ -5,6 +5,8 @@ require_relative "lib.rb"
 RELAY_CHAINSPEC = "rococo-local"
 PARACHAIN_CHAINSPEC = ""
 
+prepare_workspace
+
 relay_chain = create_chain( "relay", POLKADOT, RELAY_CHAINSPEC )
 
 node = create_node( relay_chain, "relay_v001" )
