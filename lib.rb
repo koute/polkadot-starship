@@ -532,6 +532,9 @@ def generate_prometheus_config chain
 end
 
 def start_monitoring
+    raise "Port 9090 needs to be free to run Prometheus" unless is_port_open? 9090
+    raise "Port 3000 needs to be free to run Grafana" unless is_port_open? 3000
+
     STDERR.puts "Starting Prometheus..."
     run "screen -L -Logfile #{(File.join ROOT, "prometheus-logs.txt").shellescape} -dmS prometheus docker run --rm --net=host --name starship-prometheus -v #{File.join( ROOT, "prometheus" ).shellescape}:/etc/prometheus prom/prometheus"
 
