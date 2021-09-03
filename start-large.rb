@@ -32,8 +32,10 @@ RELAY_NON_VALIDATORS.times do |n|
     node.extra_args += COMMON_EXTRA_ARGS
 end
 
+parachains = []
 PARACHAIN_CHAINSPECS.each_with_index.each do |chainspec_name, p|
     parachain = create_parachain( relay_chain, "para%02i" % [p + 1], POLKADOT_COLLATOR, chainspec_name )
+    parachains << parachain
 
     node = create_node( parachain, "para%02i_bootnode" % [p + 1] )
     node.is_bootnode = true
@@ -53,6 +55,11 @@ PARACHAIN_CHAINSPECS.each_with_index.each do |chainspec_name, p|
         node.relaynode.extra_args += COMMON_EXTRA_ARGS
     end
 end
+
+connect_with_hrmp( parachains[0], parachains[1] )
+connect_with_hrmp( parachains[1], parachains[0] )
+connect_with_hrmp( parachains[1], parachains[2] )
+connect_with_hrmp( parachains[2], parachains[1] )
 
 start_network relay_chain
 start_monitoring
