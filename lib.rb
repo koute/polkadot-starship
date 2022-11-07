@@ -194,13 +194,14 @@ Node = Struct.new(
     :identity,
     :identity_path,
     :logs_path,
+    :pid_path,
     :start,
     :relaynode,
     :paranode,
     :keys,
-    :cpu_list,
 
     # These can be used to customize the node.
+    :binary,
     :phrase,
     :port,
     :ws_port,
@@ -210,17 +211,24 @@ Node = Struct.new(
     :is_bootnode,
     :is_invulnerable,
     :balance,
-    :extra_args
+    :in_peers,
+    :out_peers,
+    :extra_args,
+    :env,
+    :cpu_list,
+    :start_delay
 )
 
 def create_node( chain, name )
     node = Node.new
     node.name = name
+    node.binary = chain.binary
     node.root_path = File.join chain.root_path, "nodes", node.name
     node.base_path = File.join node.root_path, "base"
     node.key_path = File.join node.root_path, "key"
     node.identity_path = File.join node.root_path, "identity"
     node.logs_path = File.join node.root_path, "logs.txt"
+    node.pid_path = File.join node.root_path, "pid"
     FileUtils.mkdir_p node.root_path
 
     # Here we generate the libp2p key; this is used by the nodes to communicate with each other.
@@ -262,6 +270,10 @@ def create_node( chain, name )
     node.balance = 1000000000000000000
     node.start = true
     node.extra_args = []
+    node.env = {}
+    node.in_peers = 25
+    node.out_peers = 25
+    node.start_delay = 0
 
     chain.nodes << node
 
@@ -429,6 +441,10 @@ def generate_chainspec chain
         end
     end
 
+    if genesis_config["phragmenElection"]
+        genesis_config["phragmenElection"]["members"].sort!
+    end
+
     if chain.parachain_id
         chain.chainspec["para_id"] = chain.parachain_id
         genesis_config["parachainInfo"]["parachainId"] = chain.parachain_id
@@ -444,7 +460,7 @@ def generate_chainspec chain
             generate_chainspec parachain
 
             parachain_id = parachain.parachain_id
-            genesis_state = capture "#{parachain.binary.shellescape} export-genesis-state --parachain-id #{parachain_id} --chain #{parachain.chainspec_raw_path.shellescape}"
+            genesis_state = capture "#{parachain.binary.shellescape} export-genesis-state --chain #{parachain.chainspec_raw_path.shellescape}"
             genesis_wasm = capture "#{parachain.binary.shellescape} export-genesis-wasm --chain #{parachain.chainspec_raw_path.shellescape}"
             genesis_config["paras"]["paras"] << [parachain_id, [
                 genesis_state,
@@ -482,12 +498,14 @@ def node_to_args chain, node
         "--ws-port", node.ws_port,
         "--node-key-file", node.key_path,
         "--name", node.name,
-        "--discover-local=false",
         "--no-mdns",
-        "--db-cache", "2",
-        "--pool-kbytes", "2048",
+        "--db-cache", "1",
+        "--pool-kbytes", "128",
+        "--trie-cache-size", "1048576",
         "--listen-addr", "/ip4/0.0.0.0/tcp/#{node.port}",
-        "--prometheus-port", node.prometheus_port
+        "--prometheus-port", node.prometheus_port,
+        "--in-peers", node.in_peers,
+        "--out-peers", node.out_peers
     ]
 
     args += ["--validator"] if node.is_validator
@@ -589,20 +607,33 @@ def start_monitoring
 end
 
 def launch_node node, chain, args
-    cmd = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} nice -n 20 "
+    cmd_outer = "screen -L -Logfile #{node.logs_path.shellescape} -dmS #{node.name.shellescape} nice -n 20 "
     if node.cpu_list
-        cmd << "taskset --cpu-list #{node.cpu_list.join(",")} "
+        cmd_outer << "taskset --cpu-list #{node.cpu_list.join(",")} "
     end
-    cmd << "#{chain.binary.shellescape} #{args}"
 
-    start_sh = File.join node.root_path, "start.sh"
-    File.write start_sh, cmd
+    cmd_inner = "#!/bin/bash\n"
+    cmd_inner << "echo \"$$\" > #{node.pid_path.shellescape}\n"
+    node.env.each do |key, value|
+        cmd_inner << "export #{key}=#{value.shellescape}\n"
+    end
+    cmd_inner << "exec #{node.binary.shellescape} #{args}\n"
+
+    inner_path = File.join node.root_path, "start_internal"
+    File.write inner_path, cmd_inner
+    FileUtils.chmod 0755, inner_path
+
+    cmd_outer << "#{inner_path}"
+
+    start_sh = File.join node.root_path, "start"
+    File.write start_sh, cmd_outer
     FileUtils.chmod 0755, start_sh
-    run cmd
 
-    stop_sh = File.join node.root_path, "stop.sh"
-    File.write stop_sh, "screen -S #{node.name.shellescape} -p 0 -X stuff '^C'"
+    stop_sh = File.join node.root_path, "stop"
+    File.write stop_sh, "rm -f #{node.pid_path.shellescape}\nscreen -S #{node.name.shellescape} -p 0 -X stuff '^C'"
     FileUtils.chmod 0755, stop_sh
+
+    run cmd_outer
 end
 
 def start_network chain
@@ -632,24 +663,54 @@ def start_network chain
         end
     end
 
+    remaining = []
     chain.nodes.each do |node|
         next unless node.start
-        STDERR.puts "Starting node '#{node.name}' on '#{chain.name}'..."
-        args = node_to_args chain, node
-        args = args.map(&:to_s).map(&:shellescape).join(" ")
-        launch_node node, chain, args
+        remaining << [nil, node]
     end
 
     chain.parachains.each do |parachain|
         parachain.nodes.each do |node|
-            STDERR.puts "Starting node '#{node.name}' on '#{parachain.name}'..."
-            # These args are for the parachain node.
-            args = node_to_args parachain, node
-            args += ["--"]
-            # And these args are for the relay chain node.
-            args += node_to_args chain, node.relaynode
-            args = args.map(&:to_s).map(&:shellescape).join(" ")
-            launch_node node, parachain, args
+            remaining << [parachain, node]
+        end
+    end
+
+    start_at = Time.now
+    wait_until = start_at
+    while remaining.empty? == false
+        now = Time.now
+        wait_until = nil
+        remaining.delete_if do |parachain, node|
+            launch_at = start_at + node.start_delay
+            if launch_at <= now
+                if parachain == nil
+                    STDERR.puts "Starting node '#{node.name}' on '#{chain.name}'..."
+                    args = node_to_args chain, node
+                    args = args.map(&:to_s).map(&:shellescape).join(" ")
+                    launch_node node, chain, args
+                else
+                    STDERR.puts "Starting node '#{node.name}' on '#{parachain.name}'..."
+                    # These args are for the parachain node.
+                    args = node_to_args parachain, node
+                    args += ["--"]
+                    # And these args are for the relay chain node.
+                    args += node_to_args chain, node.relaynode
+                    args = args.map(&:to_s).map(&:shellescape).join(" ")
+                    launch_node node, parachain, args
+                end
+                true
+            else
+                if wait_until == nil
+                    wait_until = launch_at
+                else
+                    wait_until = [wait_until, launch_at].min
+                end
+                false
+            end
+        end
+
+        if wait_until != nil
+            sleep 0.1 while wait_until > Time.now
         end
     end
 

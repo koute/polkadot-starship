@@ -2,9 +2,9 @@
 # Grab it from here: https://github.com/paritytech/polkadot
 POLKADOT = "./polkadot"
 
-# Path to your `polkadot-collator` binary
+# Path to your `polkadot-parachain` binary
 # Grab it from here: https://github.com/paritytech/cumulus
-POLKADOT_COLLATOR = "./polkadot-collator"
+POLKADOT_COLLATOR = "./polkadot-parachain"
 
 # The path where your nodes' files will reside
 #    WARNING: Whatever you put here will be deleted with "rm -Rf"

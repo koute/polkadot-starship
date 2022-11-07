@@ -21,8 +21,7 @@
 1. Put `polkadot` and `polkadot-collator` in the root of this repository, or modify `config.rb`
 2. Run one of the `start-*` scripts to start a network
 3. Use `screen -r` to access a running node
-4. `killall polkadot polkadot-collator` to kill the network
-5. `docker stop starship-prometheus` and `docker stop starship-grafana` to kill the monitoring
+4. Run `stop.rb` to kill the network and monitoring
 
 ### Why yet another project to launch a testnet?
 
