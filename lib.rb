@@ -187,6 +187,7 @@ def create_chain( name, binary, base_chainspec )
 end
 
 Node = Struct.new(
+    :chain,
     :name,
     :root_path,
     :base_path,
@@ -196,8 +197,8 @@ Node = Struct.new(
     :logs_path,
     :pid_path,
     :start,
-    :relaynode,
-    :paranode,
+    :relay_node,
+    :para_node,
     :keys,
 
     # These can be used to customize the node.
@@ -216,19 +217,19 @@ Node = Struct.new(
     :extra_args,
     :env,
     :cpu_list,
-    :start_delay
+    :start_delay,
+    :relay_rpc_node
 )
 
-def create_node( chain, name )
+def create_node( chain, name, kind = nil )
     node = Node.new
+    node.chain = chain
     node.name = name
-    node.binary = chain.binary
     node.root_path = File.join chain.root_path, "nodes", node.name
     node.base_path = File.join node.root_path, "base"
     node.key_path = File.join node.root_path, "key"
     node.identity_path = File.join node.root_path, "identity"
     node.logs_path = File.join node.root_path, "logs.txt"
-    node.pid_path = File.join node.root_path, "pid"
     FileUtils.mkdir_p node.root_path
 
     # Here we generate the libp2p key; this is used by the nodes to communicate with each other.
@@ -245,22 +246,27 @@ def create_node( chain, name )
         break if is_port_open? node.port
     end
 
-    loop do
-        $ws_port_counter ||= 0
-        port_offset = $ws_port_counter
-        $ws_port_counter += 1
+    unless kind == :parachain_embedded_relay_node
+        node.binary = chain.binary
+        node.pid_path = File.join node.root_path, "pid"
 
-        node.ws_port = BASE_PORT_WS + port_offset
-        break if is_port_open? node.ws_port
-    end
+        loop do
+            $ws_port_counter ||= 0
+            port_offset = $ws_port_counter
+            $ws_port_counter += 1
 
-    loop do
-        $prometheus_port_counter ||= 0
-        port_offset = $prometheus_port_counter
-        $prometheus_port_counter += 1
+            node.ws_port = BASE_PORT_WS + port_offset
+            break if is_port_open? node.ws_port
+        end
 
-        node.prometheus_port = BASE_PORT_PROMETHEUS + port_offset
-        break if is_port_open? node.prometheus_port
+        loop do
+            $prometheus_port_counter ||= 0
+            port_offset = $prometheus_port_counter
+            $prometheus_port_counter += 1
+
+            node.prometheus_port = BASE_PORT_PROMETHEUS + port_offset
+            break if is_port_open? node.prometheus_port
+        end
     end
 
     node.is_validator = false
@@ -279,11 +285,11 @@ def create_node( chain, name )
 
     if chain.relaychain
         # Every parachain node also automatically runs a relay chain node.
-        node.relaynode = create_node( chain.relaychain, name )
-        node.relaynode.paranode = node
+        node.relay_node = create_node( chain.relaychain, name, :parachain_embedded_relay_node )
+        node.relay_node.para_node = node
         # Since the parachain node will automatically start the relay chain
         # node we don't need to explicitly start it ourselves.
-        node.relaynode.start = false
+        node.relay_node.start = false
     end
 
     node
@@ -495,7 +501,6 @@ def node_to_args chain, node
         "--execution", "wasm",
         "--base-path", node.base_path,
         "--chain", chain.chainspec_raw_path,
-        "--ws-port", node.ws_port,
         "--node-key-file", node.key_path,
         "--name", node.name,
         "--no-mdns",
@@ -503,10 +508,37 @@ def node_to_args chain, node
         "--pool-kbytes", "128",
         "--trie-cache-size", "1048576",
         "--listen-addr", "/ip4/0.0.0.0/tcp/#{node.port}",
-        "--prometheus-port", node.prometheus_port,
-        "--in-peers", node.in_peers,
-        "--out-peers", node.out_peers
     ]
+
+    if node.in_peers
+        args += [
+            "--in-peers", node.in_peers,
+        ]
+    end
+
+    if node.out_peers
+        args += [
+            "--out-peers", node.out_peers
+        ]
+    end
+
+    if node.ws_port
+        args += [
+            "--ws-port", node.ws_port,
+        ]
+    end
+
+    if node.prometheus_port
+        args += [
+            "--prometheus-port", node.prometheus_port
+        ]
+    end
+
+    if node.relay_rpc_node
+        args += [
+            "--relay-chain-rpc-url", "ws://127.0.0.1:#{node.relay_rpc_node.ws_port}"
+        ]
+    end
 
     args += ["--validator"] if node.is_validator
     args += ["--collator"] if node.is_collator
@@ -525,10 +557,10 @@ def generate_prometheus_config chain
 
     chain.nodes.each do |node|
         targets = ["127.0.0.1:#{node.prometheus_port}"]
-        if node.paranode
+        if node.para_node
             # The Prometheus endpoint on the paranode side has only a bunch of "substrate_*" metrics;
             # not sure how useful it actually is, but let's just include it here anyway.
-            targets << "127.0.0.1:#{node.paranode.prometheus_port}"
+            targets << "127.0.0.1:#{node.para_node.prometheus_port}"
         end
         config["scrape_configs"] << {
             "job_name" => node.name,
@@ -682,6 +714,14 @@ def start_network chain
         wait_until = nil
         remaining.delete_if do |parachain, node|
             launch_at = start_at + node.start_delay
+            if node.relay_rpc_node
+                begin
+                    TCPSocket.new "127.0.0.1", node.relay_rpc_node.ws_port
+                    rescue Errno::ECONNREFUSED
+                        launch_at = Time.now + 0.2
+                end
+            end
+
             if launch_at <= now
                 if parachain == nil
                     STDERR.puts "Starting node '#{node.name}' on '#{chain.name}'..."
@@ -694,7 +734,7 @@ def start_network chain
                     args = node_to_args parachain, node
                     args += ["--"]
                     # And these args are for the relay chain node.
-                    args += node_to_args chain, node.relaynode
+                    args += node_to_args chain, node.relay_node
                     args = args.map(&:to_s).map(&:shellescape).join(" ")
                     launch_node node, parachain, args
                 end
