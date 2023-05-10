@@ -577,6 +577,15 @@ def generate_prometheus_config chain
         }
     end
 
+    config["scrape_configs"] << {
+        "job_name" => "memory-usage",
+        "static_configs" => [
+            {
+                "targets" => ["127.0.0.1:9089"]
+            }
+        ]
+    }
+
     prometheus_path = File.join ROOT, "prometheus"
     FileUtils.mkdir_p prometheus_path
     File.write File.join( prometheus_path, "prometheus.yml" ), config.to_yaml
@@ -588,6 +597,9 @@ def start_monitoring
 
     STDERR.puts "Starting Prometheus..."
     run "screen -L -Logfile #{(File.join ROOT, "prometheus-logs.txt").shellescape} -dmS prometheus docker run --rm --net=host --name starship-prometheus -v #{File.join( ROOT, "prometheus" ).shellescape}:/etc/prometheus prom/prometheus"
+
+    STDERR.puts "Starting memory monitoring..."
+    run "screen -dmS memory-logger bash -c 'cd tools/monitor-memory; exec cargo run --release #{ROOT.shellescape}'"
 
     STDERR.puts "Starting Grafana..."
     run "screen -L -Logfile #{(File.join ROOT, "grafana-logs.txt").shellescape} -dmS grafana docker run --rm --net=host --name starship-grafana grafana/grafana"
@@ -761,6 +773,7 @@ end
 def stop_network
     system "killall -q #{File.basename POLKADOT}"
     system "killall -q #{File.basename POLKADOT_COLLATOR}"
+    system "killall -q memory-monitor"
 end
 
 def stop_monitoring
