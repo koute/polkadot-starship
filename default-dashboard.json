@@ -68,7 +68,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1630561137008,
+  "iteration": 1645169944006,
   "links": [],
   "panels": [
     {
@@ -140,7 +140,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "polkadot_block_height{instance=~\"$Node\", status=\"best\"} - on(instance) polkadot_block_height{instance=~\"$Node\", status=\"finalized\"}",
+          "expr": "substrate_block_height{instance=~\"$Node\", status=\"best\"} - on(instance) substrate_block_height{instance=~\"$Node\", status=\"finalized\"}",
           "interval": "",
           "legendFormat": "{{instance}}",
           "refId": "A"
@@ -218,7 +218,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "polkadot_block_height{instance=~\"$Node\",status=\"best\"} - on (instance) polkadot_block_height{instance=~\"$Node\",status=\"finalized\"}",
+          "expr": "substrate_block_height{instance=~\"$Node\",status=\"best\"} - on (instance) substrate_block_height{instance=~\"$Node\",status=\"finalized\"}",
           "interval": "",
           "legendFormat": "{{instance}}",
           "refId": "A"
@@ -226,6 +226,185 @@
       ],
       "title": "Unfinalized Blocks",
       "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 21,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(1/rate(substrate_block_height{status=\"best\"}[1m]))/30",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Average block time",
+      "type": "timeseries"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "hiddenSeries": false,
+      "id": 20,
+      "legend": {
+        "alignAsTable": true,
+        "avg": false,
+        "current": true,
+        "max": true,
+        "min": false,
+        "rightSide": true,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "memory_usage_rss{exported_instance=~\"$Node\"}",
+          "interval": "",
+          "legendFormat": "{{exported_instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "RSS",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "bytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
     },
     {
       "aliasColors": {},
@@ -245,7 +424,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 24
       },
       "hiddenSeries": false,
       "id": 4,
@@ -347,7 +526,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 32
       },
       "hiddenSeries": false,
       "id": 8,
@@ -443,7 +622,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 40
       },
       "hiddenSeries": false,
       "id": 12,
@@ -539,7 +718,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 48
       },
       "hiddenSeries": false,
       "id": 10,
@@ -636,7 +815,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 56
       },
       "hiddenSeries": false,
       "id": 14,
@@ -671,7 +850,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "polkadot_sync_peers{instance=~\"${Node}\"}",
+          "expr": "${metric_namespace}_sync_peers{instance=~\"${Node}\"}",
           "interval": "",
           "legendFormat": "{{instance}}",
           "refId": "A"
@@ -776,7 +955,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 64
       },
       "id": 16,
       "options": {
@@ -857,7 +1036,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 72
       },
       "id": 18,
       "options": {
@@ -893,7 +1072,7 @@
         "allValue": null,
         "current": {},
         "datasource": "${DS_PROMETHEUS}",
-        "definition": "polkadot_process_start_time_seconds",
+        "definition": "substrate_process_start_time_seconds",
         "description": null,
         "error": null,
         "hide": 0,
@@ -903,7 +1082,7 @@
         "name": "Node",
         "options": [],
         "query": {
-          "query": "polkadot_process_start_time_seconds",
+          "query": "substrate_process_start_time_seconds",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -916,8 +1095,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "polkadot",
-          "value": "polkadot"
+          "text": "substrate",
+          "value": "substrate"
         },
         "description": null,
         "error": null,
@@ -929,11 +1108,11 @@
         "options": [
           {
             "selected": true,
-            "text": "polkadot",
-            "value": "polkadot"
+            "text": "substrate",
+            "value": "substrate"
           }
         ],
-        "query": "polkadot",
+        "query": "substrate",
         "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
@@ -941,12 +1120,12 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Internal Monitoring",
   "uid": "_nPP9x4nz",
-  "version": 9
+  "version": 2
 }
