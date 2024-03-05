@@ -34,7 +34,7 @@ def is_port_open? port
 end
 
 def wait_for_port port
-    1000.times do
+    10000.times do
         socket = TCPSocket.new "127.0.0.1", port
         socket.close
         return
@@ -49,14 +49,18 @@ end
 def run( cmd )
     STDERR.puts "#{VT_DARK}> #{cmd}#{VT_RESET}"
     system cmd
-    raise "command failed" unless $?.exitstatus == 0
+    raise "command failed: #{cmd}" unless $?.exitstatus == 0
 end
 
 def capture( cmd )
+    capture_raw( cmd ).strip
+end
+
+def capture_raw( cmd )
     STDERR.puts "#{VT_DARK}> #{cmd}#{VT_RESET}"
     output = `#{cmd}`
-    raise "command failed" unless $?.exitstatus == 0
-    output.strip
+    raise "command failed: #{cmd}" unless $?.exitstatus == 0
+    output
 end
 
 Keys = Struct.new(
@@ -146,6 +150,7 @@ class Chain < Struct.new(
     :chainspec_raw_path,
     :chainspec,
     :nodes,
+    :config,
 
     # Relaychain-only
     :parachains,
@@ -153,7 +158,8 @@ class Chain < Struct.new(
 
     # Parachain-only
     :parachain_id,
-    :relaychain
+    :relaychain,
+    :is_dynamic
 )
     def inspect
         "Chain(#{self.name})"
@@ -181,6 +187,8 @@ def create_chain( name, binary, base_chainspec )
     chain.parachains = []
     # The list of HRMP channels between parachains on this relay chain.
     chain.hrmp_channels = []
+    chain.config = {}
+    chain.is_dynamic = false
 
     FileUtils.mkdir_p chain.root_path
     chain
@@ -205,7 +213,7 @@ Node = Struct.new(
     :binary,
     :phrase,
     :port,
-    :ws_port,
+    :rpc_port,
     :prometheus_port,
     :is_validator,
     :is_collator,
@@ -218,11 +226,13 @@ Node = Struct.new(
     :env,
     :cpu_list,
     :start_delay,
-    :relay_rpc_node
+    :relay_rpc_node,
+    :pool_kbytes,
 )
 
 def create_node( chain, name, kind = nil )
     node = Node.new
+    node.pool_kbytes = 128
     node.chain = chain
     node.name = name
     node.root_path = File.join chain.root_path, "nodes", node.name
@@ -249,24 +259,24 @@ def create_node( chain, name, kind = nil )
     unless kind == :parachain_embedded_relay_node
         node.binary = chain.binary
         node.pid_path = File.join node.root_path, "pid"
+    end
 
-        loop do
-            $ws_port_counter ||= 0
-            port_offset = $ws_port_counter
-            $ws_port_counter += 1
+    loop do
+        $rpc_port_counter ||= 0
+        port_offset = $rpc_port_counter
+        $rpc_port_counter += 1
 
-            node.ws_port = BASE_PORT_WS + port_offset
-            break if is_port_open? node.ws_port
-        end
+        node.rpc_port = BASE_PORT_WS + port_offset
+        break if is_port_open? node.rpc_port
+    end
 
-        loop do
-            $prometheus_port_counter ||= 0
-            port_offset = $prometheus_port_counter
-            $prometheus_port_counter += 1
+    loop do
+        $prometheus_port_counter ||= 0
+        port_offset = $prometheus_port_counter
+        $prometheus_port_counter += 1
 
-            node.prometheus_port = BASE_PORT_PROMETHEUS + port_offset
-            break if is_port_open? node.prometheus_port
-        end
+        node.prometheus_port = BASE_PORT_PROMETHEUS + port_offset
+        break if is_port_open? node.prometheus_port
     end
 
     node.is_validator = false
@@ -331,11 +341,12 @@ end
 def generate_chainspec chain
     STDERR.puts "Generating chainspec for '#{chain.name}'..."
 
-    genesis_config = chain.chainspec["genesis"]["runtime"]
-    if genesis_config.include? "runtime_genesis_config"
-        # For Rococo, which keeps the genesis configuration under a different key for some reason.
-        genesis_config = genesis_config["runtime_genesis_config"]
-    end
+    # This changed a few times, to pick whichever is present.
+    genesis_config = [
+        chain.chainspec["genesis"]["runtime"],
+        (chain.chainspec["genesis"]["runtime"] || {})["runtime_genesis_config"],
+        (chain.chainspec["genesis"]["runtimeGenesis"] || {})["patch"]
+    ].find { |cfg| cfg != nil && !cfg.empty? }
 
     # Clear out all of the defaults.
     # These usually contain the keys for built-in development accounts like Alice, Bob, etc.
@@ -456,7 +467,9 @@ def generate_chainspec chain
         genesis_config["parachainInfo"]["parachainId"] = chain.parachain_id
     end
 
-    if genesis_config["paras"]
+
+    if chain.parachain_id == nil
+        genesis_config["paras"] ||= {}
         genesis_config["paras"]["paras"] = []
         chain.parachains.each do |parachain|
             # This is technically unnecessary since we pass the relay chain's chainspec on the command line,
@@ -464,15 +477,33 @@ def generate_chainspec chain
             parachain.chainspec["relay_chain"] = "does-not-exist"
 
             generate_chainspec parachain
-
             parachain_id = parachain.parachain_id
-            genesis_state = capture "#{parachain.binary.shellescape} export-genesis-state --chain #{parachain.chainspec_raw_path.shellescape}"
-            genesis_wasm = capture "#{parachain.binary.shellescape} export-genesis-wasm --chain #{parachain.chainspec_raw_path.shellescape}"
-            genesis_config["paras"]["paras"] << [parachain_id, [
-                genesis_state,
-                genesis_wasm,
-                true
-            ]]
+
+            maybe_raw = if parachain.is_dynamic
+                "--raw"
+            else
+                ""
+            end
+
+            genesis_state = capture_raw "#{parachain.binary.shellescape} export-genesis-state --chain #{parachain.chainspec_raw_path.shellescape} #{maybe_raw}"
+            genesis_wasm = capture_raw "#{parachain.binary.shellescape} export-genesis-wasm --chain #{parachain.chainspec_raw_path.shellescape} #{maybe_raw}"
+
+            if parachain.is_dynamic
+                File.write File.join(parachain.root_path, "genesis.state"), genesis_state
+                File.write File.join(parachain.root_path, "genesis.wasm"), genesis_wasm
+            else
+                genesis_config["paras"]["paras"] << [parachain_id, [
+                    genesis_state,
+                    genesis_wasm,
+                    true
+                ]]
+            end
+        end
+
+        config = genesis_config["configuration"]["config"]
+        chain.config.each do |key, value|
+            raise "key doesn't exist in chain config: '#{key}'" unless config.include? key
+            config[key] = value
         end
     end
 
@@ -497,18 +528,22 @@ end
 
 def node_to_args chain, node
     args = [
-        "--rpc-methods", "Unsafe",
-        "--execution", "wasm",
         "--base-path", node.base_path,
         "--chain", chain.chainspec_raw_path,
         "--node-key-file", node.key_path,
         "--name", node.name,
         "--no-mdns",
         "--db-cache", "1",
-        "--pool-kbytes", "128",
         "--trie-cache-size", "1048576",
         "--listen-addr", "/ip4/0.0.0.0/tcp/#{node.port}",
+        "--no-hardware-benchmarks",
     ]
+
+    if node.pool_kbytes
+        args += [
+            "--pool-kbytes", node.pool_kbytes,
+        ]
+    end
 
     if node.in_peers
         args += [
@@ -522,9 +557,11 @@ def node_to_args chain, node
         ]
     end
 
-    if node.ws_port
+    if node.rpc_port
         args += [
-            "--ws-port", node.ws_port,
+            "--rpc-methods", "unsafe",
+            "--unsafe-rpc-external",
+            "--rpc-port", node.rpc_port,
         ]
     end
 
@@ -536,7 +573,7 @@ def node_to_args chain, node
 
     if node.relay_rpc_node
         args += [
-            "--relay-chain-rpc-url", "ws://127.0.0.1:#{node.relay_rpc_node.ws_port}"
+            "--relay-chain-rpc-url", "ws://127.0.0.1:#{node.relay_rpc_node.rpc_port}"
         ]
     end
 
@@ -681,6 +718,11 @@ def launch_node node, chain, args
 end
 
 def start_network chain
+    if chain.parachains.any? { |parachain| parachain.is_dynamic }
+        `subxt --help`
+        raise "you don't have 'subxt' installed" unless $?.exitstatus == 0
+    end
+
     generate_prometheus_config chain
 
     chain.nodes.each do |node|
@@ -728,7 +770,7 @@ def start_network chain
             launch_at = start_at + node.start_delay
             if node.relay_rpc_node
                 begin
-                    TCPSocket.new "127.0.0.1", node.relay_rpc_node.ws_port
+                    TCPSocket.new "127.0.0.1", node.relay_rpc_node.rpc_port
                     rescue Errno::ECONNREFUSED
                         launch_at = Time.now + 0.2
                 end
@@ -770,15 +812,67 @@ def start_network chain
     STDERR.puts
 end
 
+def register_parachains chain
+    return unless chain.parachains.any? { |parachain| parachain.is_dynamic }
+    min_pool_size = chain.parachains.filter { |parachain| parachain.is_dynamic }.map { |parachain| File.size(File.join(parachain.root_path, "genesis.wasm")) }.max / 1024
+    rpc_nodes = chain.nodes.select { |node| node.pool_kbytes == nil || node.pool_kbytes >= min_pool_size }
+    metadata_path = File.join chain.root_path, "metadata.scale"
+
+    if rpc_nodes.empty?
+        raise "No RPC nodes found with big enough txpools to register the parachains; set 'pool_kbytes' and try again."
+    end
+
+    puts "RPC nodes with big enough txpool: #{rpc_nodes.length}"
+    Dir.chdir("tools/register-parachain") do
+        run "cargo build -q -p register-parachain --release"
+
+        STDERR.puts "Waiting for RPC port..."
+        wait_for_port rpc_nodes[0].rpc_port
+
+        run "subxt metadata -f bytes --url 'ws://127.0.0.1:#{rpc_nodes[0].rpc_port}' > #{metadata_path.shellescape}"
+        if File.read("src/metadata.scale") != File.read(metadata_path)
+            STDERR.puts "Generated new metadata!"
+            FileUtils.cp metadata_path, "src/metadata.scale"
+        end
+
+        # Doing more than one in parallel seems not be useful.
+        parallel_registrations = 1
+
+        nth_rpc_node = 0
+        chain.parachains.filter { |parachain| parachain.is_dynamic }.each_slice(parallel_registrations) do |parachains|
+            parachains = parachains.map do |parachain|
+                rpc_node = rpc_nodes[nth_rpc_node % rpc_nodes.length]
+                nth_rpc_node += 1
+                [parachain, rpc_node]
+            end
+
+            threads = []
+            parachains.each do |parachain, rpc_node|
+                threads << Thread.new do
+                    STDERR.puts "Registering parachain '#{parachain.name}'... (id = #{parachain.parachain_id}, RPC node = #{rpc_node.name}, RPC node txpool size = #{rpc_node.pool_kbytes}kB)"
+                    run "cargo run -q -p register-parachain --release 'ws://127.0.0.1:#{rpc_node.rpc_port}' #{parachain.parachain_id} #{File.join(parachain.root_path, "genesis.state").shellescape} #{File.join(parachain.root_path, "genesis.wasm").shellescape}"
+                end
+            end
+
+            threads.each do |thread|
+                thread.join
+            end
+        end
+    end
+
+    STDERR.puts "#{VT_GREEN}Finished launching all parachains!#{VT_RESET}"
+    STDERR.puts
+end
+
 def stop_network
     system "killall -q #{File.basename POLKADOT}"
     system "killall -q #{File.basename POLKADOT_COLLATOR}"
-    system "killall -q memory-monitor"
 end
 
 def stop_monitoring
     system "docker stop starship-prometheus &> /dev/null"
     system "docker stop starship-grafana &> /dev/null"
+    system "killall -q monitor-memory"
 end
 
 def prepare_workspace
